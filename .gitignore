@@ -1,1 +1,39 @@
 project-root/.env.example
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyc
+
+# Local env files
+.env
+.env.*
+
+# OS files
+Thumbs.db
+.DS_Store
+
+# IDEs
+.vscode/
+.idea/
+
+# Project generated data (do not commit large/binary artifacts)
+
+project-root/processed/
+project-root/feature_store/features/
+project-root/ml/models/
+project-root/ml/artifacts/
+project-root/logs/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Misc
+*.log
+tmp/

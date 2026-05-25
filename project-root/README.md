@@ -149,3 +149,87 @@ Next steps (suggested)
 - Add schema validation (pydantic) before publishing messages
 - Add retries and backoff for producers (tenacity)
 - Partition S3 keys further by source/hour if downstream Athena queries are planned
+
+========================
+AI / ML — Next Phase
+========================
+
+This repository now includes a Phase-1 AI/ML augmentation that processes raw JSONL from S3/MinIO into analytics-ready Parquet, produces feature vectors, trains models, serves predictions via FastAPI, and provides a Streamlit demo dashboard.
+
+New top-level modules
+- `processing/` : read raw JSONL from S3, normalize, clean, deduplicate and write Parquet.
+- `feature_store/` : feature engineering and feature store (per-technology Parquet features).
+- `ml/` : training scripts and model persistence under `ml/models/`.
+- `api/` : FastAPI app exposing `/trends/top`, `/technology/{name}`, `/forecast/{name}`, `/health`.
+- `dashboard/` : Streamlit starter dashboard.
+
+Quick run (local, minimal):
+
+1. Start Kafka + MinIO using docker-compose
+
+```bash
+docker-compose up -d
+```
+
+2. Install Python deps (recommended venv)
+
+```bash
+python -m venv .venv
+# Linux/macOS
+source .venv/bin/activate
+# Windows PowerShell
+.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+```
+
+3. Configure `.env` (see `.env.example`) and export credentials for MinIO/AWS if needed.
+
+4. Run processors (example: process raw S3 objects once)
+
+```bash
+python -m processing.processor --run-once
+```
+
+5. Generate features
+
+```bash
+python -m feature_store.engineer
+```
+
+6. Train a model (saves models to `ml/models`)
+
+```bash
+python -m ml.train --train
+```
+
+7. Run the API (locally)
+
+```bash
+uvicorn api.app:app --reload
+```
+
+8. Run the dashboard (locally)
+
+```bash
+streamlit run dashboard/streamlit_app.py
+```
+
+Notes
+- The new processing/feature/ML layers are intentionally small, readable, and designed to be extended for production: add distributed compute (Dask/Spark), scheduling (Airflow), and model registry (MLflow) as next steps.
+- See `.env.example` for environment variables used by the new modules.
+
+Quick demo scripts
+
+- Generate demo raw data to S3/MinIO:
+```bash
+python scripts/generate_demo_data.py
+```
+- Run the pipeline (process -> features -> train):
+```bash
+python scripts/run_pipeline.py
+```
+- Full smoke demo (generate, run pipeline, attempt API call):
+```bash
+python scripts/smoke_demo.py
+```
+

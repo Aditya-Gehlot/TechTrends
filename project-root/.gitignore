@@ -1,4 +1,30 @@
 .env
+.env.*
 .state/
 __pycache__/
+*.py[cod]
 *.pyc
+
+# Virtualenvs (local dev)
+.venv/
+venv/
+env/
+ENV/
+
+# Data and derived artifacts
+# Data/
+# processed/
+# feature_store/features/
+# ml/models/
+# ml/artifacts/
+
+# IDEs
+.vscode/
+.idea/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Logs
+*.log
+logs/

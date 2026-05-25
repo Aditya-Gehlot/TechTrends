@@ -50,3 +50,15 @@ RAW_S3_FLUSH_INTERVAL = int(os.environ.get("RAW_S3_FLUSH_INTERVAL", 60))
 
 # Logging
 LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO")
+
+# Processed data, feature store and ML paths
+PROCESSED_DIR = Path(os.environ.get("PROCESSED_DIR", BASE_DIR / "processed"))
+FEATURE_STORE_DIR = Path(os.environ.get("FEATURE_STORE_DIR", BASE_DIR / "feature_store"))
+ML_MODELS_DIR = Path(os.environ.get("ML_MODELS_DIR", BASE_DIR / "ml" / "models"))
+MLFLOW_TRACKING_URI = os.environ.get("MLFLOW_TRACKING_URI", "http://localhost:5000")
+FEATURE_WINDOW_DAYS = int(os.environ.get("FEATURE_WINDOW_DAYS", 7))
+
+# Ensure directories exist
+PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
+FEATURE_STORE_DIR.mkdir(parents=True, exist_ok=True)
+ML_MODELS_DIR.mkdir(parents=True, exist_ok=True)
