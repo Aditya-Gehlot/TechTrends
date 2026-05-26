@@ -48,6 +48,18 @@ class ModelTrainer:
 
     def _load_all_features(self) -> pd.DataFrame:
         parts = []
+        consolidated_path = Path(self.feature_dir).parents[0] / "features_all.parquet"
+        if consolidated_path.exists():
+            try:
+                df = pd.read_parquet(consolidated_path)
+                if "date" in df.columns:
+                    df["date"] = pd.to_datetime(df["date"]).dt.date
+                elif "timestamp" in df.columns:
+                    df["date"] = pd.to_datetime(df["timestamp"]).dt.date
+                return df
+            except Exception:
+                logger.exception("Failed to read consolidated feature file %s", consolidated_path)
+
         if not self.feature_dir.exists():
             return pd.DataFrame()
         for tech_dir in self.feature_dir.iterdir():
@@ -154,9 +166,11 @@ class ModelTrainer:
                 return {"accuracy": float(np.mean(accs)), "folds": folds}
             return {"accuracy": None, "folds": folds}
 
+        rf_estimators = getattr(settings, "ML_RANDOM_FOREST_ESTIMATORS", 100)
+
         # baseline: RandomForest
-        rf = RandomForestClassifier(n_estimators=200, random_state=42)
-        rf_cv = _time_series_cv_estimate(RandomForestClassifier(n_estimators=200, random_state=42), "random_forest")
+        rf = RandomForestClassifier(n_estimators=rf_estimators, random_state=42, n_jobs=-1)
+        rf_cv = _time_series_cv_estimate(RandomForestClassifier(n_estimators=rf_estimators, random_state=42, n_jobs=-1), "random_forest")
         results["random_forest_cv"] = rf_cv
 
         # train final RF on full train portion (80%) and evaluate on holdout (last 20%)
@@ -177,7 +191,7 @@ class ModelTrainer:
         best_score = report_rf.get("accuracy", 0)
 
         # XGBoost (optional)
-        if xgb is not None:
+        if xgb is not None and getattr(settings, "ML_TRAIN_XGBOOST", False):
             try:
                 xg = xgb.XGBClassifier(use_label_encoder=False, eval_metric="mlogloss")
                 xg_cv = _time_series_cv_estimate(xgb.XGBClassifier(use_label_encoder=False, eval_metric="mlogloss"), "xgboost")
@@ -246,7 +260,7 @@ class ModelTrainer:
         logger.info("Training complete. Best model saved to %s", model_path)
 
         # optional: train prophet per-tech for forecasting popularity
-        if Prophet is not None:
+        if Prophet is not None and getattr(settings, "ML_TRAIN_PROPHET", False):
             try:
                 prophet_dir = self.model_dir / "prophet"
                 prophet_dir.mkdir(parents=True, exist_ok=True)

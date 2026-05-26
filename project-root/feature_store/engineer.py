@@ -299,6 +299,13 @@ class FeatureEngineer:
         feat_df = pd.concat(features_rows, ignore_index=True)
         feat_df["date"] = pd.to_datetime(feat_df["timestamp"]).dt.date
 
+        try:
+            consolidated_path = Path(self.feature_dir) / "features_all.parquet"
+            feat_df.to_parquet(consolidated_path, index=False, engine="pyarrow")
+            logger.info("Wrote consolidated feature dataset to %s", consolidated_path)
+        except Exception:
+            logger.exception("Failed to write consolidated feature dataset")
+
         # write per-tech per-date parquet files
         base = Path(self.feature_dir) / "features"
         for tech, g in feat_df.groupby("tech"):

@@ -1,0 +1,57 @@
+[
+  {
+    "company_id": "CMP-001",
+    "company": "OpenAI",
+    "country": "United States",
+    "country_code": "US",
+    "region": "North America",
+    "sector": "AI Platform",
+    "stage": "private",
+    "reference_type": "real_reference",
+    "dominant_topics": "AI Agents, LLM, Generative AI, Enterprise AI"
+  },
+  {
+    "company_id": "CMP-002",
+    "company": "Anthropic",
+    "country": "United States",
+    "country_code": "US",
+    "region": "North America",
+    "sector": "AI Platform",
+    "stage": "private",
+    "reference_type": "real_reference",
+    "dominant_topics": "AI Agents, LLM, Enterprise AI"
+  },
+  {
+    "company_id": "CMP-003",
+    "company": "Google DeepMind",
+    "country": "United States",
+    "country_code": "US",
+    "region": "North America",
+    "sector": "Research Lab",
+    "stage": "subsidiary",
+    "reference_type": "real_reference",
+    "dominant_topics": "LLM, Robotics, Edge AI, Enterprise AI"
+  },
+  {
+    "company_id": "CMP-004",
+    "company": "NVIDIA",
+    "country": "United States",
+    "country_code": "US",
+    "region": "North America",
+    "sector": "Semiconductors",
+    "stage": "public",
+    "reference_type": "real_reference",
+    "dominant_topics": "Semiconductors, GPU Infrastructure, Inference Optimization"
+  },
+  {
+    "company_id": "CMP-005",
+    "company": "Meta AI",
+    "country": "United States",
+    "country_code": "US",
+    "region": "North America",
+    "sector": "AI Research",
+    "stage": "subsidiary",
+    "reference_type": "real_reference",
+    "dominant_topics": "Generative AI, Open Source AI, AI Agents"
+  }
+]

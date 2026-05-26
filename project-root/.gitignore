@@ -1,5 +1,6 @@
 .env
 .env.*
+!.env.example
 .state/
 __pycache__/
 *.py[cod]
@@ -13,10 +14,18 @@ ENV/
 
 # Data and derived artifacts
 # Data/
-# processed/
-# feature_store/features/
-# ml/models/
-# ml/artifacts/
+processed/
+feature_store/features/
+feature_store/features_all.parquet
+ml/models/
+ml/artifacts/
+features/
+github_events/
+google_trends/
+linkedin_jobs/
+stackoverflow/
+tech_blogs/
+twitter/
 
 # IDEs
 .vscode/

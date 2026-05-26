@@ -1,0 +1,44 @@
+{
+  "top": [
+    {
+      "tech": "LLM",
+      "score": 64.72
+    },
+    {
+      "tech": "Generative AI",
+      "score": 63.51
+    },
+    {
+      "tech": "Enterprise AI",
+      "score": 56.71
+    },
+    {
+      "tech": "AI Agents",
+      "score": 55.95
+    },
+    {
+      "tech": "Cybersecurity",
+      "score": 55.11
+    },
+    {
+      "tech": "Semiconductors",
+      "score": 47.61
+    },
+    {
+      "tech": "Cloud Computing",
+      "score": 47.17
+    },
+    {
+      "tech": "Developer Tools",
+      "score": 44.4
+    },
+    {
+      "tech": "Data Engineering",
+      "score": 43.97
+    },
+    {
+      "tech": "Open Source AI",
+      "score": 43.81
+    }
+  ]
+}

@@ -51,12 +51,29 @@ RAW_S3_FLUSH_INTERVAL = int(os.environ.get("RAW_S3_FLUSH_INTERVAL", 60))
 # Logging
 LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO")
 
+# Helper: treat unset and empty env vars the same for path settings
+def _path_from_env(name: str, default: Path) -> Path:
+    raw = os.environ.get(name)
+    if raw is None or not str(raw).strip():
+        return Path(default)
+    return Path(raw)
+
+
+def _bool_from_env(name: str, default: bool = False) -> bool:
+    raw = os.environ.get(name)
+    if raw is None or not str(raw).strip():
+        return default
+    return str(raw).strip().lower() in {"1", "true", "yes", "on"}
+
 # Processed data, feature store and ML paths
-PROCESSED_DIR = Path(os.environ.get("PROCESSED_DIR", BASE_DIR / "processed"))
-FEATURE_STORE_DIR = Path(os.environ.get("FEATURE_STORE_DIR", BASE_DIR / "feature_store"))
-ML_MODELS_DIR = Path(os.environ.get("ML_MODELS_DIR", BASE_DIR / "ml" / "models"))
+PROCESSED_DIR = _path_from_env("PROCESSED_DIR", BASE_DIR / "processed")
+FEATURE_STORE_DIR = _path_from_env("FEATURE_STORE_DIR", BASE_DIR / "feature_store")
+ML_MODELS_DIR = _path_from_env("ML_MODELS_DIR", BASE_DIR / "ml" / "models")
 MLFLOW_TRACKING_URI = os.environ.get("MLFLOW_TRACKING_URI", "http://localhost:5000")
 FEATURE_WINDOW_DAYS = int(os.environ.get("FEATURE_WINDOW_DAYS", 7))
+ML_TRAIN_XGBOOST = _bool_from_env("ML_TRAIN_XGBOOST", False)
+ML_TRAIN_PROPHET = _bool_from_env("ML_TRAIN_PROPHET", False)
+ML_RANDOM_FOREST_ESTIMATORS = int(os.environ.get("ML_RANDOM_FOREST_ESTIMATORS", 100))
 
 # Ensure directories exist
 PROCESSED_DIR.mkdir(parents=True, exist_ok=True)

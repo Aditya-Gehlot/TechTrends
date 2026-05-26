@@ -1,0 +1,19 @@
+{
+  "technology": "AI Agents",
+  "predicted_growth": 0.24,
+  "confidence": 0.83,
+  "trend": "booming",
+  "features": {
+    "mentions_7d_mean": 62.3,
+    "mentions_growth_pct": 18.4,
+    "job_postings_7d_sum": 146.0,
+    "github_events_7d_sum": 318.0,
+    "technology_popularity_score": 74.6
+  },
+  "feature_importances": {
+    "mentions_7d_mean": 0.23,
+    "job_postings_7d_sum": 0.19,
+    "github_events_7d_sum": 0.17,
+    "trend_score_avg": 0.14
+  }
+}

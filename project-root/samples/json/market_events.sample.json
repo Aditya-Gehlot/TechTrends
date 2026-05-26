@@ -1,0 +1,42 @@
+[
+  {
+    "event_id": "EVT-001",
+    "event_date": "2025-01-22",
+    "window_days": 10,
+    "title": "Agentic coding workflows move from demos to pilots",
+    "topic_impacts": "{\"AI Agents\": 12, \"Developer Tools\": 8, \"Enterprise AI\": 6}",
+    "sentiment_shift": 0.07
+  },
+  {
+    "event_id": "EVT-002",
+    "event_date": "2025-03-12",
+    "window_days": 14,
+    "title": "Robotics model announcement lifts embodied AI interest",
+    "topic_impacts": "{\"Robotics\": 18, \"Edge AI\": 10, \"LLM\": 4}",
+    "sentiment_shift": 0.05
+  },
+  {
+    "event_id": "EVT-003",
+    "event_date": "2025-05-28",
+    "window_days": 16,
+    "title": "GPU infrastructure demand accelerates after strong AI compute commentary",
+    "topic_impacts": "{\"GPU Infrastructure\": 18, \"Semiconductors\": 16, \"Enterprise AI\": 8, \"Inference Optimization\": 7}",
+    "sentiment_shift": 0.08
+  },
+  {
+    "event_id": "EVT-004",
+    "event_date": "2025-06-04",
+    "window_days": 10,
+    "title": "Data platform vendors push agentic analytics and AI apps",
+    "topic_impacts": "{\"Data Engineering\": 10, \"Enterprise AI\": 10, \"MLOps\": 7, \"AI Agents\": 6}",
+    "sentiment_shift": 0.05
+  },
+  {
+    "event_id": "EVT-005",
+    "event_date": "2025-07-18",
+    "window_days": 12,
+    "title": "High-profile cloud outage raises reliability concerns",
+    "topic_impacts": "{\"Cloud Computing\": 8, \"DevOps\": 7, \"Cybersecurity\": 5}",
+    "sentiment_shift": -0.06
+  }
+]

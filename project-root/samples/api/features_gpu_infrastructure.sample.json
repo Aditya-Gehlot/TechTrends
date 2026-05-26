@@ -1,0 +1,12 @@
+{
+  "technology": "GPU Infrastructure",
+  "features": {
+    "trend_score_avg": 81.2,
+    "mentions_7d_mean": 48.6,
+    "mentions_velocity": 6.8,
+    "stars_sum": 1234,
+    "contributors_n": 88,
+    "job_postings": 64,
+    "risk_indicator": "moderate"
+  }
+}

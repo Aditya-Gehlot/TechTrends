@@ -1,0 +1,14 @@
+event_id,event_date,window_days,title,topic_impacts,sentiment_shift
+EVT-001,2025-01-22,10,Agentic coding workflows move from demos to pilots,"{""AI Agents"": 12, ""Developer Tools"": 8, ""Enterprise AI"": 6}",0.07
+EVT-002,2025-03-12,14,Robotics model announcement lifts embodied AI interest,"{""Robotics"": 18, ""Edge AI"": 10, ""LLM"": 4}",0.05
+EVT-003,2025-05-28,16,GPU infrastructure demand accelerates after strong AI compute commentary,"{""GPU Infrastructure"": 18, ""Semiconductors"": 16, ""Enterprise AI"": 8, ""Inference Optimization"": 7}",0.08
+EVT-004,2025-06-04,10,Data platform vendors push agentic analytics and AI apps,"{""Data Engineering"": 10, ""Enterprise AI"": 10, ""MLOps"": 7, ""AI Agents"": 6}",0.05
+EVT-005,2025-07-18,12,High-profile cloud outage raises reliability concerns,"{""Cloud Computing"": 8, ""DevOps"": 7, ""Cybersecurity"": 5}",-0.06
+EVT-006,2025-08-11,18,Late-stage funding cools and hiring plans tighten,"{""SaaS"": -8, ""Cloud Computing"": -4, ""Developer Tools"": -3, ""Enterprise AI"": -2}",-0.08
+EVT-007,2025-09-19,12,Major cyber incident drives urgent security demand,"{""Cybersecurity"": 20, ""AI Agents"": 4, ""Cloud Computing"": 3}",-0.1
+EVT-008,2025-10-09,12,Open model releases boost community experimentation,"{""Open Source AI"": 14, ""LLM"": 8, ""MLOps"": 6, ""Developer Tools"": 4}",0.08
+EVT-009,2025-11-18,16,Enterprise copilots expand from pilots to budgeted rollouts,"{""Enterprise AI"": 18, ""AI Agents"": 10, ""Developer Tools"": 6, ""Data Engineering"": 5}",0.07
+EVT-010,2026-01-15,16,Inference cost pressure increases optimization focus,"{""Inference Optimization"": 16, ""GPU Infrastructure"": 9, ""Open Source AI"": 5}",0.03
+EVT-011,2026-02-23,10,AI-enabled attack campaigns increase board-level cyber spending,"{""Cybersecurity"": 18, ""Enterprise AI"": 4, ""Edge AI"": 2}",-0.09
+EVT-012,2026-03-21,14,Web3 trading and token activity rebound before another correction,"{""Web3"": 14}",0.04
+EVT-013,2026-04-16,16,Enterprise agent platforms mature with audit and governance features,"{""AI Agents"": 16, ""Enterprise AI"": 9, ""Automation"": 6, ""Cybersecurity"": 4}",0.06

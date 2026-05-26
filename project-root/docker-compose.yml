@@ -27,33 +27,34 @@ services:
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
     restart: unless-stopped
 
-    minio:
-      image: minio/minio:latest
-      environment:
-        MINIO_ROOT_USER: minioadmin
-        MINIO_ROOT_PASSWORD: minioadmin
-      command: server /data
-      ports:
-        - "9000:9000"
-      volumes:
-        - minio_data:/data
-      restart: unless-stopped
+  minio:
+    image: minio/minio:latest
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    command: server /data
+    ports:
+      - "9000:9000"
+    volumes:
+      - minio_data:/data
+    restart: unless-stopped
 
-    api:
-      build:
-        context: .
-        dockerfile: Dockerfile.api
-      ports:
-        - "8000:8000"
-      environment:
-        - BOOTSTRAP_SERVERS=kafka:29092
-        - RAW_S3_ENDPOINT_URL=http://minio:9000
-        - RAW_S3_ACCESS_KEY_ID=minioadmin
-        - RAW_S3_SECRET_ACCESS_KEY=minioadmin
-        - RAW_S3_BUCKET=techtrends-raw
-      depends_on:
-        - kafka
-        - minio
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    ports:
+      - "8000:8000"
+    environment:
+      - BOOTSTRAP_SERVERS=kafka:29092
+      - RAW_S3_ENDPOINT_URL=http://minio:9000
+      - RAW_S3_ACCESS_KEY_ID=minioadmin
+      - RAW_S3_SECRET_ACCESS_KEY=minioadmin
+      - RAW_S3_BUCKET=techtrends-raw
+    depends_on:
+      - kafka
+      - minio
+
   kafka-setup:
     image: confluentinc/cp-kafka:7.4.0
     depends_on:
@@ -67,3 +68,6 @@ services:
          kafka-topics --bootstrap-server kafka:29092 --create --topic tech_blogs --partitions 1 --replication-factor 1 && exit 0 || sleep 2;
        done; exit 1'
     restart: 'no'
+
+volumes:
+  minio_data:
