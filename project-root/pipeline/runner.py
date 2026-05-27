@@ -18,14 +18,16 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
-import joblib
 import numpy as np
 import pandas as pd
 from pandas.api.types import is_numeric_dtype
 
 from config import settings
+from domain.pipeline import PIPELINE_STAGE_DEFINITIONS
 from feature_store.engineer import FeatureEngineer
+from infrastructure.storage.pipeline_state import PipelineStateFileRepository
 from ml.train import ModelTrainer
+from prediction.service import PredictionService
 from processing.local_processor import LocalProcessor
 from scripts.generate_market_intel_dataset import generate_market_intel_datasets
 
@@ -39,20 +41,7 @@ except Exception:  # pragma: no cover - DB support is optional at runtime
 RUNS_FILE = Path(settings.STATE_DIR) / "pipeline_runs.json"
 CURRENT_FILE = Path(settings.STATE_DIR) / "pipeline_current.json"
 
-STAGE_DEFINITIONS = [
-    ("raw_data_collection", "Raw data collection"),
-    ("data_validation", "Data validation"),
-    ("data_cleaning", "Data cleaning"),
-    ("data_normalization_scaling", "Data normalization/scaling"),
-    ("feature_engineering", "Feature engineering"),
-    ("feature_selection", "Feature selection"),
-    ("train_test_split", "Train/test split"),
-    ("model_training", "Model training"),
-    ("model_evaluation", "Model evaluation"),
-    ("prediction_generation", "Prediction/forecast generation"),
-    ("final_output_creation", "Final output creation"),
-    ("dashboard_refresh", "Dashboard refresh"),
-]
+STAGE_DEFINITIONS = list(PIPELINE_STAGE_DEFINITIONS)
 
 TRANSFORMATION_RULES = {
     "encoding": ["trend_label", "sentiment", "risk_indicator"],
@@ -133,15 +122,10 @@ def _empty_stage(stage_id: str, name: str) -> Dict[str, Any]:
 class PipelineStore:
     def __init__(self) -> None:
         self._lock = threading.Lock()
-        Path(settings.STATE_DIR).mkdir(parents=True, exist_ok=True)
-        if not RUNS_FILE.exists():
-            RUNS_FILE.write_text("[]", encoding="utf-8")
+        self._files = PipelineStateFileRepository(settings.STATE_DIR)
 
     def _read_runs_unlocked(self) -> List[Dict[str, Any]]:
-        try:
-            return json.loads(RUNS_FILE.read_text(encoding="utf-8"))
-        except Exception:
-            return []
+        return self._files.read_runs()
 
     def list_runs(self) -> List[Dict[str, Any]]:
         with self._lock:
@@ -149,39 +133,29 @@ class PipelineStore:
 
     def get_current(self) -> Optional[Dict[str, Any]]:
         with self._lock:
-            if not CURRENT_FILE.exists():
-                return None
-            try:
-                return json.loads(CURRENT_FILE.read_text(encoding="utf-8"))
-            except Exception:
-                return None
+            return self._files.read_current()
 
     def get_run(self, run_id: str) -> Optional[Dict[str, Any]]:
         with self._lock:
             for run in self._read_runs_unlocked():
                 if run.get("run_id") == run_id:
                     return run
-            current = None
-            if CURRENT_FILE.exists():
-                try:
-                    current = json.loads(CURRENT_FILE.read_text(encoding="utf-8"))
-                except Exception:
-                    current = None
+            current = self._files.read_current()
             if current and current.get("run_id") == run_id:
                 return current
             return None
 
     def save_current(self, run: Dict[str, Any]) -> None:
         with self._lock:
-            CURRENT_FILE.write_text(json.dumps(_jsonable(run), indent=2), encoding="utf-8")
+            self._files.write_current(_jsonable(run))
 
     def append_history(self, run: Dict[str, Any]) -> None:
         with self._lock:
             runs = self._read_runs_unlocked()
             runs = [r for r in runs if r.get("run_id") != run.get("run_id")]
             runs.insert(0, _jsonable(run))
-            RUNS_FILE.write_text(json.dumps(runs[:100], indent=2), encoding="utf-8")
-            CURRENT_FILE.write_text(json.dumps(_jsonable(run), indent=2), encoding="utf-8")
+            self._files.write_runs(runs[:100])
+            self._files.write_current(_jsonable(run))
 
     def is_running(self) -> bool:
         current = self.get_current()
@@ -763,43 +737,7 @@ class PipelineRunner:
         return sorted(correlations, key=lambda r: abs(r["correlation"]), reverse=True)[:20]
 
     def _generate_predictions(self, run_id: str | None = None, model_id: str | None = None) -> Dict[str, Any]:
-        feature_path = Path(settings.FEATURE_STORE_DIR) / "features_all.parquet"
-        model_files = sorted(Path(settings.ML_MODELS_DIR).glob("*.joblib"), key=lambda p: p.stat().st_mtime, reverse=True)
-        if not feature_path.exists() or not model_files:
-            return {"prediction_count": 0, "input_shape": [0, 0], "output_shape": [0, 0], "prediction_path": None}
-
-        features = pd.read_parquet(feature_path)
-        features["timestamp"] = pd.to_datetime(features["timestamp"], errors="coerce")
-        latest = features.sort_values("timestamp").groupby("tech", as_index=False).tail(1).reset_index(drop=True)
-        artifact = joblib.load(model_files[0])
-        model = artifact.get("model")
-        regression_model = artifact.get("regression_model")
-        feature_columns = artifact.get("feature_columns") or []
-        X = latest.reindex(columns=feature_columns).fillna(0)
-        predictions = latest[["tech", "date", "technology_popularity_score", "ecosystem_momentum_score"]].copy()
-        predictions["trend"] = model.predict(X) if model is not None and not X.empty else None
-        if hasattr(model, "predict_proba") and not X.empty:
-            predictions["confidence"] = np.max(model.predict_proba(X), axis=1)
-        else:
-            predictions["confidence"] = None
-        if regression_model is not None and not X.empty:
-            predictions["predicted_growth"] = regression_model.predict(X)
-        else:
-            predictions["predicted_growth"] = predictions["trend"].map({"booming": 0.25, "stable": 0.0, "declining": -0.15})
-
-        out_path = Path(settings.FEATURE_STORE_DIR) / "predictions_latest.parquet"
-        json_path = Path(settings.FEATURE_STORE_DIR) / "predictions_latest.json"
-        predictions.to_parquet(out_path, index=False)
-        json_path.write_text(json.dumps(_jsonable(predictions.to_dict(orient="records")), indent=2), encoding="utf-8")
-        if db_repo is not None:
-            db_repo.insert_predictions_batch(predictions, external_run_id=run_id, model_id=model_id)
-        return {
-            "prediction_count": int(len(predictions)),
-            "input_shape": [int(latest.shape[0]), int(latest.shape[1])],
-            "output_shape": [int(predictions.shape[0]), int(predictions.shape[1])],
-            "prediction_path": str(out_path),
-            "prediction_json_path": str(json_path),
-        }
+        return PredictionService().generate_latest_predictions(run_id=run_id, model_id=model_id).as_dict()
 
     def _clean_local_outputs(self) -> None:
         targets = [
