@@ -71,9 +71,22 @@ FEATURE_STORE_DIR = _path_from_env("FEATURE_STORE_DIR", BASE_DIR / "feature_stor
 ML_MODELS_DIR = _path_from_env("ML_MODELS_DIR", BASE_DIR / "ml" / "models")
 MLFLOW_TRACKING_URI = os.environ.get("MLFLOW_TRACKING_URI", "http://localhost:5000")
 FEATURE_WINDOW_DAYS = int(os.environ.get("FEATURE_WINDOW_DAYS", 7))
+FEATURE_WRITE_DAILY_PARTITIONS = _bool_from_env("FEATURE_WRITE_DAILY_PARTITIONS", False)
 ML_TRAIN_XGBOOST = _bool_from_env("ML_TRAIN_XGBOOST", False)
 ML_TRAIN_PROPHET = _bool_from_env("ML_TRAIN_PROPHET", False)
 ML_RANDOM_FOREST_ESTIMATORS = int(os.environ.get("ML_RANDOM_FOREST_ESTIMATORS", 100))
+
+# PostgreSQL persistence. Raw generated files remain local; DB persistence starts
+# at normalized processed records and pipeline metadata.
+DATABASE_URL = os.environ.get(
+    "DATABASE_URL",
+    "postgresql+psycopg2://postgres:postgres@127.0.0.1:5433/techtrends",
+)
+ENABLE_DB_PERSISTENCE = _bool_from_env("ENABLE_DB_PERSISTENCE", False)
+STORE_NORMALIZED_RECORDS = _bool_from_env("STORE_NORMALIZED_RECORDS", False)
+CLEAN_DB_LATEST_ONLY = _bool_from_env("CLEAN_DB_LATEST_ONLY", False)
+DB_BATCH_SIZE = int(os.environ.get("DB_BATCH_SIZE", 1000))
+DB_ECHO = _bool_from_env("DB_ECHO", False)
 
 # Ensure directories exist
 PROCESSED_DIR.mkdir(parents=True, exist_ok=True)

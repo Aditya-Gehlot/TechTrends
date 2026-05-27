@@ -6,7 +6,7 @@ This project tracks technology trends from multiple sources, converts raw events
 
 It supports two modes:
 
-1. Offline local mode using the checked-in dummy CSV data in `Data/`
+1. Offline local mode using the generated sample corpus in `Data/`
 2. Streaming mode using Kafka plus S3/MinIO
 
 In your current local run, the project is using offline local mode.
@@ -34,6 +34,15 @@ The project flow is:
 
 `Data sources -> ingestion -> normalized records -> processed parquet -> feature engineering -> ML training -> API -> Streamlit dashboard`
 
+An optional PostgreSQL layer now persists derived data and metadata after the
+raw-file boundary:
+
+`processed parquet -> PostgreSQL normalized_records / data_sources_summary -> PostgreSQL daily_features / feature_snapshots -> PostgreSQL ml_models / predictions -> API`
+
+Raw generated files remain local artifacts only. The project does not import
+`Data/*.csv`, raw generated parquet directories, or `imports/` bulk files as raw
+database tables.
+
 There are two ingestion paths.
 
 ## Architecture Diagram
@@ -42,7 +51,8 @@ There are two ingestion paths.
 flowchart LR
     subgraph Sources["Data Sources"]
         A1["Local CSV Data
-        Data/*.csv"]
+        Data/*.csv
+        Data/market_intel/*.csv"]
         A2["Google Trends API"]
         A3["StackOverflow API"]
         A4["GitHub Events API"]
@@ -77,7 +87,8 @@ flowchart LR
         D1["FeatureEngineer
         feature_store/engineer.py"]
         D2["Feature Store Files
-        feature_store/features/<tech>/<date>.parquet"]
+        feature_store/features_all.parquet
+        feature_store/features/<tech>/latest.parquet"]
         D3["technology_popularity_score
         ecosystem_momentum_score
         rolling metrics"]
@@ -102,6 +113,10 @@ flowchart LR
         F4["/features/{name}
         /technology/{name}
         /health"]
+        F6["/pipeline/run
+        /pipeline/status
+        /pipeline/metrics
+        /pipeline/runs"]
         F5["Streamlit Dashboard
         dashboard/streamlit_app.py"]
     end
@@ -138,9 +153,11 @@ flowchart LR
     F1 --> F2
     F1 --> F3
     F1 --> F4
+    F1 --> F6
     F2 --> F5
     F3 --> F5
     F4 --> F5
+    F6 --> F5
 ```
 
 ### Diagram Reading Guide
@@ -158,7 +175,7 @@ flowchart LR
 In your current local run, only this path is active:
 
 ```text
-Data/*.csv
+Data/*.csv + Data/market_intel/*.csv
 -> LocalProcessor
 -> processed parquet
 -> FeatureEngineer
@@ -202,7 +219,8 @@ The local dataset has been regenerated into a larger 2025-2026 synthetic corpus 
 Current generated scale:
 
 - Total rows: `208387`
-- Date range: `2025-01-01` to `2026-04-30`
+- Event rows processed locally: `208378`
+- Date range: `2025-01-01` to `2026-05-01`
 - Countries: United States, India, United Kingdom, Germany, Canada, Singapore, United Arab Emirates, Japan, China, France
 - Topics: AI Agents, LLM, Generative AI, Cybersecurity, Cloud Computing, DevOps, Edge AI, Robotics, Web3, Semiconductors, SaaS, Data Engineering, Automation, MLOps, Open Source AI, GPU Infrastructure, Developer Tools, Vector Databases, Inference Optimization, Enterprise AI
 
@@ -218,7 +236,7 @@ Generated support assets:
 
 ### Offline local datasets
 
-The repo includes these local CSV files in `Data/`:
+The repo includes these local event CSV files in `Data/`:
 
 - `linkedin_jobs.csv`
 - `twitter_stream.csv`
@@ -226,16 +244,16 @@ The repo includes these local CSV files in `Data/`:
 - `tech_blogs.csv`
 - `stackoverflow_questions.csv`
 - `google_trends.csv`
+- `market_intel/reddit_discussions.csv`
+- `market_intel/hackernews_posts.csv`
+- `market_intel/youtube_ai_content.csv`
+- `market_intel/startup_funding.csv`
+- `market_intel/producthunt_launches.csv`
+- `market_intel/news_media_mentions.csv`
+- `market_intel/kaggle_ml_activity.csv`
+- `market_intel/market_events.csv`
 
-Dataset summary from `Data/dataset_summary.json`:
-
-- LinkedIn jobs: `3000`
-- Twitter stream: `6000`
-- GitHub events: `2500`
-- Tech blogs: `1200`
-- StackOverflow questions: `3500`
-- Google Trends rows: `744`
-- Date range: `2026-01-01` to `2026-01-31`
+`market_intel/companies.csv` is processed as a local dimension and not counted as trend-event volume.
 
 ### Streaming producers
 
@@ -389,13 +407,14 @@ What it reads:
 
 What it writes:
 
-- per-technology feature parquet files under `feature_store/features/`
 - one consolidated feature dataset at `feature_store/features_all.parquet`
+- latest per-technology feature parquet files under `feature_store/features/`
+- optional per-technology per-date feature files when `--write-daily-partitions` is used
 
 Example output:
 
-- `feature_store/features/python/2026-01-12.parquet`
 - `feature_store/features_all.parquet`
+- `feature_store/features/AI%20Agents/latest.parquet`
 
 ### How features are built
 
@@ -420,8 +439,8 @@ LinkedIn-derived:
 Twitter-derived:
 
 - `twitter_count`
-- `sentiment_avg`
-- `engagement_sum`
+- `twitter_sentiment_avg`
+- `twitter_engagement_sum`
 
 GitHub-derived:
 
@@ -577,8 +596,10 @@ Optional Prophet models:
 The `.joblib` model artifact stores:
 
 - trained model object
+- trained regression model for numeric growth prediction
 - `feature_columns`
 - `trained_at`
+- `horizon_days`
 - `holdout_confidence`
 - `feature_importances`
 
@@ -598,13 +619,25 @@ Returns service health status.
 
 #### `/trends/top`
 
-Reads the latest feature file for each technology and sorts by `technology_popularity_score`.
+Reads the consolidated feature store, selects the latest row for each technology, and sorts by `technology_popularity_score`.
 
 This endpoint is:
 
 - analytics-driven
-- based on local feature files
+- based on local feature files generated from sample data
 - not a direct ML prediction endpoint
+
+#### `/trends/history/{name}`
+
+Returns recent daily feature history for a technology.
+
+#### `/sources/summary`
+
+Returns generated dataset counts, feature-store counts, date ranges, and latest model metadata.
+
+#### `/models/latest`
+
+Returns latest model metadata, feature columns, feature importances, and whether a regression model is present.
 
 #### `/features/{name}`
 
@@ -624,8 +657,8 @@ Behavior:
 2. load latest trained model artifact
 3. build model input using saved feature columns
 4. run prediction
-5. optionally compute confidence from `predict_proba`
-6. optionally load Prophet model for numeric forecast enrichment
+5. compute confidence from `predict_proba` when available
+6. predict numeric growth with the saved regression model
 7. return prediction payload
 
 Forecast response includes:
@@ -647,7 +680,7 @@ The API serves local files created by your pipeline:
 
 So in your current setup, the dashboard data is:
 
-`Streamlit -> FastAPI -> local artifacts generated from dummy CSV data`
+`Streamlit -> FastAPI -> local artifacts generated from the sample corpus`
 
 ## 7. Dashboard Layer
 
@@ -661,7 +694,8 @@ What it does:
 - builds a bar chart
 - accepts a technology name for forecast lookup
 - calls `GET /forecast/{name}`
-- renders confidence, growth, feature importances, and raw JSON
+- calls `GET /trends/history/{name}`
+- renders confidence, growth, feature importances, source summaries, history, and raw JSON
 
 The dashboard is a thin UI layer.
 
@@ -675,10 +709,11 @@ This is the main orchestration script for local runs.
 
 Flow:
 
-1. if `Data/` exists, use `LocalProcessor`
-2. otherwise use `S3Processor`
-3. run feature engineering
-4. run model training
+1. optionally clean local derived outputs with `--clean`
+2. if `Data/` exists, use `LocalProcessor`
+3. otherwise use `S3Processor`
+4. run feature engineering
+5. run model training unless `--skip-training` is provided
 
 ### `scripts/generate_demo_data.py`
 
@@ -701,16 +736,16 @@ Counts generated parquet/model files so you can verify output existence.
 When you ran:
 
 ```powershell
-python -m scripts.run_pipeline
+python -m scripts.run_pipeline --clean
 ```
 
 the project did this:
 
 1. detected `Data/`
 2. skipped Kafka and S3 entirely
-3. processed local CSV data into parquet
-4. generated features for `24` technologies
-5. attempted ML training
+3. processed all generated local event CSV data into parquet
+4. generated features for `103` technologies
+5. trained classification and regression models
 6. loaded or saved outputs on local disk
 
 After training and API startup:
@@ -727,6 +762,7 @@ If you want the short version:
 - a popularity score is engineered
 - future growth of that score is converted into labels
 - ML predicts whether a technology is booming, stable, or declining
+- ML also predicts numeric future growth using the saved regression model
 - the API serves those predictions
 - the dashboard displays the results
 
@@ -748,7 +784,7 @@ So yes, ML is genuinely part of the current project, but only part of the API us
 
 These are important to understand the current state of the repo.
 
-- The local dashboard is based on dummy local CSV data unless you switch to the streaming path.
+- The local dashboard is based on the generated local sample corpus unless you switch to the streaming path.
 - `/trends/top` is feature-ranking logic, not trained model inference.
 - Labels are derived from future popularity score movement, not human annotations.
 - The pipeline is batch-oriented even in local mode.
@@ -772,8 +808,13 @@ Core files by responsibility:
 - `feature_store/engineer.py` : feature engineering
 - `ml/train.py` : model training and artifact saving
 - `api/app.py` : prediction and analytics API
+- `pipeline/runner.py` : UI/API pipeline execution, tracking, metrics, logs, and run history
+- `db/models.py` : SQLAlchemy PostgreSQL schema for derived pipeline data
+- `db/repositories.py` : optional DB persistence and DB-first API read helpers
+- `alembic/` : database migrations
 - `dashboard/streamlit_app.py` : UI dashboard
 - `scripts/run_pipeline.py` : local orchestration
+- `scripts/backfill_db_from_existing_artifacts.py` : DB backfill from processed/features/models/predictions
 - `scripts/generate_demo_data.py` : mock streaming input generation
 - `scripts/check_outputs.py` : output verification
 

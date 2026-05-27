@@ -9,16 +9,16 @@
       "score": 63.51
     },
     {
-      "tech": "Enterprise AI",
-      "score": 56.71
+      "tech": "AI Agents",
+      "score": 61.3
     },
     {
-      "tech": "AI Agents",
-      "score": 55.95
+      "tech": "Enterprise AI",
+      "score": 60.04
     },
     {
       "tech": "Cybersecurity",
-      "score": 55.11
+      "score": 57.49
     },
     {
       "tech": "Semiconductors",
@@ -30,15 +30,15 @@
     },
     {
       "tech": "Developer Tools",
-      "score": 44.4
+      "score": 44.91
+    },
+    {
+      "tech": "Open Source AI",
+      "score": 44.41
     },
     {
       "tech": "Data Engineering",
       "score": 43.97
-    },
-    {
-      "tech": "Open Source AI",
-      "score": 43.81
     }
   ]
 }

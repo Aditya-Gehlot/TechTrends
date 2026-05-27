@@ -12,20 +12,34 @@ venv/
 env/
 ENV/
 
-# Data and derived artifacts
-# Data/
+# Generated data and derived artifacts
+# Raw/generated local datasets
+Data/**/*.csv
+Data/**/*.csv.gz
+Data/**/*.parquet
+Data/**/year=*/
+Data/dataset_summary.json
+Data/market_intel/dataset_summary.json
+Data/market_intel/market_context_*.json
+Data/market_intel/DATASET_CATALOG.md
+Data/market_intel/schemas/
+
+# Generated import/export helper files
+imports/
+
+# Generated sample payloads
+samples/api/*.sample.json
+samples/json/*.sample.json
+
+# Derived pipeline outputs
 processed/
 feature_store/features/
 feature_store/features_all.parquet
+feature_store/feature_index.json
+feature_store/predictions_latest.*
+feature_store/pipeline_summary_latest.json
 ml/models/
 ml/artifacts/
-features/
-github_events/
-google_trends/
-linkedin_jobs/
-stackoverflow/
-tech_blogs/
-twitter/
 
 # IDEs
 .vscode/

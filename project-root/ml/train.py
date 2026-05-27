@@ -1,8 +1,8 @@
 """ML training pipeline.
 
 Loads features from the feature store, builds a time-aware training set,
-trains classifiers (RandomForest / XGBoost), evaluates and persists
-models and artifacts under `ml/models/` and `ml/artifacts/`.
+trains classifiers and a growth regressor, evaluates and persists models and
+artifacts under `ml/models/` and `ml/artifacts/`.
 """
 from __future__ import annotations
 
@@ -10,13 +10,14 @@ import json
 import logging
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import List
+from typing import Any, List
 
 import joblib
 import numpy as np
 import pandas as pd
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.metrics import classification_report, confusion_matrix
+from pandas.api.types import is_numeric_dtype
+from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
+from sklearn.metrics import classification_report, confusion_matrix, mean_absolute_error, r2_score
 
 try:
     from sklearn.model_selection import train_test_split
@@ -36,6 +37,11 @@ except Exception:
 from config import settings
 
 logger = logging.getLogger(__name__)
+
+try:
+    from db import repositories as db_repo
+except Exception:  # pragma: no cover - DB support is optional at runtime
+    db_repo = None
 
 
 class ModelTrainer:
@@ -101,7 +107,9 @@ class ModelTrainer:
             g = g.dropna(subset=["future_score"]).copy()
             if g.empty:
                 continue
-            g["future_growth_pct"] = g["future_score"] / (g["technology_popularity_score"].replace({0: np.nan})) - 1
+            g["future_growth_pct"] = (
+                g["future_score"] / (g["technology_popularity_score"].replace({0: np.nan})) - 1
+            ).replace([np.inf, -np.inf], 0).fillna(0)
 
             def label_fn(x: float) -> str:
                 if x > 0.2:
@@ -118,21 +126,24 @@ class ModelTrainer:
         dataset = pd.concat(rows, ignore_index=True)
         return dataset
 
-    def train(self, horizon_days: int = 7):
+    def train(self, horizon_days: int = 7, run_id: str | None = None):
         df = self.build_dataset(horizon_days=horizon_days)
         if df.empty:
             logger.info("No dataset available to train")
-            return
+            return None
 
         # select numeric features (exclude known non-feature cols)
         exclude = {"tech", "date", "timestamp", "future_score", "future_growth_pct", "trend_label"}
-        feature_cols = [c for c in df.columns if c not in exclude and np.issubdtype(df[c].dtype, np.number)]
+        # use pandas' is_numeric_dtype to handle pandas extension dtypes safely
+        feature_cols = [c for c in df.columns if c not in exclude and is_numeric_dtype(df[c])]
         if not feature_cols:
             logger.info("No numeric feature columns found")
-            return
+            return None
 
-        X = df[feature_cols].fillna(0)
-        y = df["trend_label"]
+        df_sorted = df.sort_values(["date", "tech"]).reset_index(drop=True)
+        X = df_sorted[feature_cols].fillna(0)
+        y = df_sorted["trend_label"]
+        y_growth = pd.to_numeric(df_sorted["future_growth_pct"], errors="coerce").replace([np.inf, -np.inf], 0).fillna(0)
 
         # time-series cross-validation (expanding window)
         results = {}
@@ -156,7 +167,7 @@ class ModelTrainer:
                     m = model_cls
                     m.fit(X_tr, y_tr)
                     preds = m.predict(X_te)
-                    report = classification_report(y_te, preds, output_dict=True)
+                    report = classification_report(y_te, preds, output_dict=True, zero_division=0)
                     acc = report.get("accuracy", 0)
                     accs.append(acc)
                     folds.append({"train_end": train_end, "test_end": test_end, "accuracy": acc, "report": report})
@@ -173,17 +184,19 @@ class ModelTrainer:
         rf_cv = _time_series_cv_estimate(RandomForestClassifier(n_estimators=rf_estimators, random_state=42, n_jobs=-1), "random_forest")
         results["random_forest_cv"] = rf_cv
 
-        # train final RF on full train portion (80%) and evaluate on holdout (last 20%)
-        df_sorted = df.sort_values("date")
+        # train final RF on the oldest 80% and evaluate on the newest 20%
         cutoff = int(len(df_sorted) * 0.8)
+        cutoff = max(1, min(cutoff, len(df_sorted) - 1))
         X_train = X.iloc[:cutoff]
         X_test = X.iloc[cutoff:]
         y_train = y.iloc[:cutoff]
         y_test = y.iloc[cutoff:]
+        y_growth_train = y_growth.iloc[:cutoff]
+        y_growth_test = y_growth.iloc[cutoff:]
 
         rf.fit(X_train, y_train)
         preds_rf = rf.predict(X_test)
-        report_rf = classification_report(y_test, preds_rf, output_dict=True)
+        report_rf = classification_report(y_test, preds_rf, output_dict=True, zero_division=0)
         cm_rf = confusion_matrix(y_test, preds_rf).tolist()
         results["random_forest_holdout"] = {"report": report_rf, "confusion_matrix": cm_rf}
 
@@ -198,7 +211,7 @@ class ModelTrainer:
                 results["xgboost_cv"] = xg_cv
                 xg.fit(X_train, y_train)
                 preds_xg = xg.predict(X_test)
-                report_xg = classification_report(y_test, preds_xg, output_dict=True)
+                report_xg = classification_report(y_test, preds_xg, output_dict=True, zero_division=0)
                 cm_xg = confusion_matrix(y_test, preds_xg).tolist()
                 results["xgboost_holdout"] = {"report": report_xg, "confusion_matrix": cm_xg}
                 if report_xg.get("accuracy", 0) > best_score:
@@ -219,6 +232,27 @@ class ModelTrainer:
             logger.exception("Failed to compute predict_proba")
             proba_vals = None
 
+        # Numeric growth regressor for /forecast predicted_growth.
+        regression_model = None
+        try:
+            regression_model = RandomForestRegressor(
+                n_estimators=rf_estimators,
+                random_state=42,
+                n_jobs=-1,
+                min_samples_leaf=2,
+            )
+            regression_model.fit(X_train, y_growth_train)
+            growth_preds = regression_model.predict(X_test)
+            regression_report = {
+                "mae": float(mean_absolute_error(y_growth_test, growth_preds)),
+                "r2": float(r2_score(y_growth_test, growth_preds)) if len(y_growth_test) > 1 else None,
+                "target_mean": float(y_growth.mean()),
+            }
+            results["random_forest_regressor_holdout"] = regression_report
+        except Exception:
+            logger.exception("Regression training failed")
+            regression_model = None
+
         # save model artifact
         timestamp = datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
         # feature importances
@@ -233,8 +267,10 @@ class ModelTrainer:
 
         model_artifact = {
             "model": best_model,
+            "regression_model": regression_model,
             "feature_columns": feature_cols,
             "trained_at": timestamp,
+            "horizon_days": horizon_days,
             "holdout_confidence": proba_vals,
             "feature_importances": importances,
         }
@@ -242,7 +278,21 @@ class ModelTrainer:
         joblib.dump(model_artifact, model_path)
 
         # save metrics/artifacts
-        metrics = {"training_timestamp": timestamp, "results": results, "holdout_confidence": proba_vals}
+        metrics: dict[str, Any] = {
+            "training_timestamp": timestamp,
+            "model_used": type(best_model).__name__,
+            "target_variable": "trend_label",
+            "horizon_days": horizon_days,
+            "training_rows": int(len(X_train)),
+            "testing_rows": int(len(X_test)),
+            "training_shape": [int(X_train.shape[0]), int(X_train.shape[1])],
+            "testing_shape": [int(X_test.shape[0]), int(X_test.shape[1])],
+            "feature_columns": feature_cols,
+            "feature_count": int(len(feature_cols)),
+            "results": results,
+            "holdout_confidence": proba_vals,
+            "model_path": str(model_path),
+        }
         metrics_path = self.artifacts_dir / f"metrics_{timestamp}.json"
         try:
             metrics_path.write_text(json.dumps(metrics, indent=2))
@@ -254,6 +304,7 @@ class ModelTrainer:
             if importances is not None:
                 fi_path = self.artifacts_dir / f"feature_importances_{timestamp}.json"
                 fi_path.write_text(json.dumps(importances, indent=2))
+                metrics["feature_importances_path"] = str(fi_path)
         except Exception:
             logger.exception("Failed to persist feature importances")
 
@@ -275,6 +326,18 @@ class ModelTrainer:
                     joblib.dump(m, prophet_dir / f"prophet_{tech}_{timestamp}.joblib")
             except Exception:
                 logger.exception("Prophet training failed or is not available")
+
+        metrics["metrics_path"] = str(metrics_path)
+        metrics["feature_importances"] = importances
+        try:
+            metrics_path.write_text(json.dumps(metrics, indent=2))
+        except Exception:
+            logger.exception("Failed to refresh metrics at %s", metrics_path)
+        if db_repo is not None:
+            db_model_id = db_repo.create_ml_model_record(metrics, external_run_id=run_id)
+            if db_model_id:
+                metrics["db_model_id"] = db_model_id
+        return metrics
 
 
 if __name__ == "__main__":

@@ -2,7 +2,7 @@
 
 This project has two runnable modes:
 
-1. Local offline pipeline using the checked-in dummy CSV data in `Data/`
+1. Local offline pipeline using the generated sample corpus in `Data/`
 2. Streaming pipeline using Kafka plus S3/MinIO
 
 The local offline path is the fastest way to validate the ML pipeline on this checkout.
@@ -21,7 +21,7 @@ Notes:
 
 ## 1. Local Offline Pipeline
 
-Use this when you want the pipeline to run entirely from the dummy CSV files already present in `Data/`.
+Use this when you want the pipeline to run entirely from the generated CSV files already present in `Data/`.
 
 ### Regenerate the large synthetic market-intelligence dataset
 
@@ -45,19 +45,26 @@ Copy-Item .env.example .env
 ```
 
 `Data/` already exists in this repo, so `scripts.run_pipeline` will automatically use `processing.local_processor.LocalProcessor`.
+The local processor now reads the top-level generated CSVs plus the event datasets under `Data/market_intel/`. `companies.csv` is written as a local dimension and is not counted as a trend event.
 
 ### Run the full local pipeline
 
 ```powershell
-python -m scripts.run_pipeline
+python -m scripts.run_pipeline --clean
 ```
 
 This runs:
 
-- CSV ingestion from `Data/`
+- CSV ingestion from `Data/` and `Data/market_intel/`
 - Parquet generation into `processed/`
-- Feature generation into `feature_store/features/`
+- Feature generation into `feature_store/features_all.parquet` and latest per-tech files in `feature_store/features/`
 - Model training into `ml/models/` and `ml/artifacts/`
+
+By default the feature layer writes one consolidated feature parquet plus one `latest.parquet` per technology. To also write one feature file per technology per date, add:
+
+```powershell
+python -m scripts.run_pipeline --clean --write-daily-partitions
+```
 
 For local runs, RandomForest is the default model. XGBoost and Prophet are disabled by default because they can make the expanded synthetic corpus slow to train. Enable them in `.env` only when needed:
 
@@ -80,6 +87,63 @@ In a second terminal:
 cd C:\TechTrends\project-root
 .venv\Scripts\Activate.ps1
 streamlit run dashboard\streamlit_app.py
+```
+
+The dashboard opens the `TechTrends Control Center`. Use the `Pipeline Control`
+tab to start a full run from the UI. The button calls FastAPI and tracks the
+same local pipeline stages that `python -m scripts.run_pipeline --clean` runs.
+
+If your API is on a non-default port, set:
+
+```powershell
+$env:API_URL="http://127.0.0.1:8001"
+streamlit run dashboard\streamlit_app.py
+```
+
+### Pipeline API checks
+
+```powershell
+Invoke-WebRequest http://localhost:8000/pipeline/status
+Invoke-WebRequest http://localhost:8000/pipeline/metrics
+Invoke-WebRequest http://localhost:8000/pipeline/runs
+Invoke-WebRequest http://localhost:8000/pipeline/predictions/latest
+```
+
+### PostgreSQL persistence
+
+Raw generated data remains file-based only. The DB layer starts at normalized
+processed parquet and stores pipeline metadata, stage progress, feature rows,
+feature snapshot metadata, model metadata, source summaries, and predictions.
+
+Start PostgreSQL and apply migrations:
+
+```powershell
+docker-compose up -d db
+alembic upgrade head
+```
+
+Run with DB persistence:
+
+```powershell
+$env:ENABLE_DB_PERSISTENCE="true"
+$env:DATABASE_URL="postgresql+psycopg2://postgres:postgres@127.0.0.1:5433/techtrends"
+python -m pipeline.runner
+```
+
+Backfill existing derived artifacts:
+
+```powershell
+$env:ENABLE_DB_PERSISTENCE="true"
+python -m scripts.backfill_db_from_existing_artifacts
+python -m scripts.backfill_db_from_existing_artifacts --store-normalized-records
+```
+
+Migration helpers:
+
+```powershell
+alembic revision --autogenerate -m "create techtrends database schema"
+alembic upgrade head
+alembic downgrade -1
 ```
 
 ### Quick checks

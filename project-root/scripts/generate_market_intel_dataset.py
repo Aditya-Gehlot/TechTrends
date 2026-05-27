@@ -10,7 +10,9 @@ Usage:
 """
 from __future__ import annotations
 
+import argparse
 import json
+import math
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -18,10 +20,19 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+import sys
+
+# Ensure project root is on sys.path so `from config import settings` works
+# when this script is executed directly (sys.path[0] is the script's dir).
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
 from config import settings
 
+# Default RNG seed (can be overridden via CLI)
 SEED = 20260526
 RNG = np.random.default_rng(SEED)
+# Scaling multiplier used to increase generated counts when needed
+SCALE = 1.0
 
 BASE_DIR = Path(settings.BASE_DIR)
 DATA_DIR = BASE_DIR / "Data"
@@ -133,6 +144,44 @@ EVENTS = [
     {"event_id": "EVT-013", "date": "2026-04-16", "window": 16, "title": "Enterprise agent platforms mature with audit and governance features", "topics": {"AI Agents": 16, "Enterprise AI": 9, "Automation": 6, "Cybersecurity": 4}, "sentiment": 0.06},
 ]
 
+MARKET_CONTEXT_VERSION = "2026-05"
+MARKET_CONTEXT_SOURCES = [
+    {
+        "name": "Gartner Top Strategic Technology Trends 2026",
+        "url": "https://www.gartner.com/en/articles/top-technology-trends-2026",
+        "signals": ["multiagent systems", "AI-native platforms", "digital trust", "AI infrastructure"],
+    },
+    {
+        "name": "McKinsey Technology Trends Outlook 2025",
+        "url": "https://www.mckinsey.com/capabilities/mckinsey-digital/our-insights/the-top-trends-in-tech",
+        "signals": ["AI", "cloud and edge computing", "robotics", "digital trust and cybersecurity"],
+    },
+    {
+        "name": "GitHub Octoverse 2025",
+        "url": "https://github.blog/news-insights/octoverse/octoverse-a-new-developer-joins-github-every-second-as-ai-leads-typescript-to-1/",
+        "signals": ["AI projects", "TypeScript", "Python", "developer tooling"],
+    },
+    {
+        "name": "Stack Overflow Developer Survey 2025",
+        "url": "https://survey.stackoverflow.co/2025/",
+        "signals": ["AI tool adoption", "developer trust concerns", "AI-related technical questions"],
+    },
+]
+
+MARKET_CONTEXT_ADJUSTMENTS = {
+    "AI Agents": {"growth": 1.18, "base": 1.08, "funding": 1.12, "github": 1.08},
+    "Enterprise AI": {"growth": 1.14, "base": 1.05, "funding": 1.08},
+    "Developer Tools": {"growth": 1.10, "github": 1.16, "sentiment": 1.04},
+    "Inference Optimization": {"growth": 1.15, "funding": 1.10, "github": 1.06},
+    "GPU Infrastructure": {"growth": 1.14, "funding": 1.12},
+    "Cybersecurity": {"growth": 1.10, "base": 1.04, "volatility": 1.10},
+    "Open Source AI": {"growth": 1.10, "github": 1.18},
+    "Vector Databases": {"growth": 1.06, "github": 1.08},
+    "Robotics": {"growth": 1.06, "funding": 1.06},
+    "Web3": {"growth": 0.88, "funding": 0.90, "volatility": 1.10},
+}
+_MARKET_CONTEXT_APPLIED = False
+
 NEWS_SOURCES = ["The Information", "TechCrunch", "Bloomberg", "Reuters", "VentureBeat", "Semafor", "The Verge", "Wired", "InfoQ", "SiliconANGLE"]
 BLOG_SOURCES = ["Medium", "Dev.to", "Substack", "InfoQ", "Towards Data Science", "Hugging Face Blog", "Engineering Blog"]
 YOUTUBE_CHANNELS = ["The AI Breakdown", "Fireship", "Two Minute Papers", "Machine Learning Street Talk", "MLOps Weekly", "Cloud Native Bytes"]
@@ -208,6 +257,31 @@ class TopicDay:
 def ensure_dirs() -> None:
     for path in [DATA_DIR, MARKET_DIR, IMPORT_DIR, API_SAMPLES_DIR, JSON_SAMPLES_DIR]:
         path.mkdir(parents=True, exist_ok=True)
+
+
+def apply_market_context_adjustments() -> None:
+    """Bias the synthetic generator with documented 2025-2026 market signals."""
+    global _MARKET_CONTEXT_APPLIED
+    if _MARKET_CONTEXT_APPLIED:
+        return
+    for topic, adjustments in MARKET_CONTEXT_ADJUSTMENTS.items():
+        if topic not in TOPICS:
+            continue
+        for field, multiplier in adjustments.items():
+            if field in TOPICS[topic]:
+                TOPICS[topic][field] = round(float(TOPICS[topic][field]) * float(multiplier), 4)
+    _MARKET_CONTEXT_APPLIED = True
+
+
+def write_market_context() -> None:
+    context = {
+        "version": MARKET_CONTEXT_VERSION,
+        "generated_at": pd.Timestamp.utcnow().isoformat(),
+        "sources": MARKET_CONTEXT_SOURCES,
+        "topic_adjustments": MARKET_CONTEXT_ADJUSTMENTS,
+        "note": "Synthetic data only; weights are anchored to public market signals and then randomized for local analytics and ML demos.",
+    }
+    (MARKET_DIR / "market_context_2026.json").write_text(json.dumps(context, indent=2), encoding="utf-8")
 
 
 def slugify(text: str) -> str:
@@ -444,7 +518,7 @@ def build_linkedin_jobs(company_df: pd.DataFrame) -> pd.DataFrame:
         country = COUNTRY_BY_CODE[company["country"]]
         social_wknd, hiring_wknd = weekend_factor(date)
         day_hiring = rec["hiring_index"] * country["hiring"] * hiring_wknd / 22
-        count = int(max(0, RNG.poisson(day_hiring / 2.1)))
+        count = int(max(0, RNG.poisson(day_hiring / 2.1) * max(1.0, SCALE)))
         for _ in range(count):
             primary_topic = weighted_choice(company["topics"], [TOPICS[t]["adoption"] for t in company["topics"]])
             role = weighted_choice(ROLE_LIBRARY[primary_topic], [1] * len(ROLE_LIBRARY[primary_topic]))
@@ -529,7 +603,7 @@ def build_twitter_stream(topic_df: pd.DataFrame) -> pd.DataFrame:
         country = COUNTRY_BY_CODE[rec["country_code"]]
         social_wknd, _ = weekend_factor(date, social=TOPICS[rec["topic"]]["weekend_social"])
         intensity = rec["trend_score"] * country["social"] * social_wknd / 130
-        count = int(max(0, RNG.poisson(intensity)))
+        count = int(max(0, RNG.poisson(intensity) * max(1.0, SCALE)))
         for _ in range(count):
             company = choose_company_for_topic(rec["topic"])
             followers = int(np.clip(RNG.lognormal(mean=9.6, sigma=0.9), 150, 420000))
@@ -603,7 +677,7 @@ def build_github_events(company_df: pd.DataFrame) -> pd.DataFrame:
         date = pd.Timestamp(rec["date"])
         company = COMPANY_BY_ID[rec["company_id"]]
         open_source_weight = 1.25 if "Open Source AI" in company["topics"] or "Developer Tools" in company["topics"] else 1.0
-        count = int(max(0, RNG.poisson((rec["trend_score"] / 60) * open_source_weight)))
+        count = int(max(0, RNG.poisson((rec["trend_score"] / 60) * open_source_weight) * max(1.0, SCALE)))
         for _ in range(count):
             topic = weighted_choice(company["topics"], [TOPICS[t]["github"] for t in company["topics"]])
             event_type = weighted_choice(event_types, [0.42, 0.24, 0.1, 0.14, 0.1])
@@ -647,7 +721,7 @@ def build_tech_blogs(topic_df: pd.DataFrame) -> pd.DataFrame:
     for rec in topic_df.to_dict("records"):
         date = pd.Timestamp(rec["date"])
         country = COUNTRY_BY_CODE[rec["country_code"]]
-        count = int(max(0, RNG.poisson(rec["trend_score"] / 750)))
+        count = int(max(0, RNG.poisson(rec["trend_score"] / 750) * max(1.0, SCALE)))
         for _ in range(count):
             company = choose_company_for_topic(rec["topic"])
             sentiment_bucket = "negative" if rec["sentiment_score"] < -0.1 else "positive" if rec["sentiment_score"] > 0.14 else "neutral"
@@ -701,7 +775,7 @@ def build_stackoverflow(topic_df: pd.DataFrame) -> pd.DataFrame:
         if rec["topic"] not in dev_topics:
             continue
         date = pd.Timestamp(rec["date"])
-        count = int(max(0, RNG.poisson(rec["trend_score"] / 230)))
+        count = int(max(0, RNG.poisson(rec["trend_score"] / 230) * max(1.0, SCALE)))
         for _ in range(count):
             company = choose_company_for_topic(rec["topic"])
             answers = int(max(0, RNG.normal(4 + rec["adoption_score"] * 0.07, 2.6)))
@@ -780,7 +854,7 @@ def build_reddit(topic_df: pd.DataFrame) -> pd.DataFrame:
     for rec in topic_df.to_dict("records"):
         date = pd.Timestamp(rec["date"])
         social_wknd, _ = weekend_factor(date, social=TOPICS[rec["topic"]]["weekend_social"] * 1.08)
-        count = int(max(0, RNG.poisson(rec["trend_score"] * social_wknd / 320)))
+        count = int(max(0, RNG.poisson(rec["trend_score"] * social_wknd / 320) * max(1.0, SCALE)))
         for _ in range(count):
             company = choose_company_for_topic(rec["topic"])
             subreddit = weighted_choice(SUBREDDITS, [1.2 if rec["topic"] in {"AI Agents", "LLM", "Open Source AI"} and s in {"r/MachineLearning", "r/artificial"} else 1 for s in SUBREDDITS])
@@ -833,7 +907,7 @@ def build_hackernews(topic_df: pd.DataFrame) -> pd.DataFrame:
         date = pd.Timestamp(rec["date"])
         if rec["topic"] not in {"AI Agents", "LLM", "Open Source AI", "Developer Tools", "Data Engineering", "GPU Infrastructure", "Inference Optimization"}:
             continue
-        count = int(max(0, RNG.poisson(rec["trend_score"] / 220)))
+        count = int(max(0, RNG.poisson(rec["trend_score"] / 220) * max(1.0, SCALE)))
         for _ in range(count):
             company = choose_company_for_topic(rec["topic"])
             points = int(max(3, RNG.normal(rec["trend_score"] * 4.2, 20)))
@@ -872,7 +946,7 @@ def build_youtube(topic_df: pd.DataFrame) -> pd.DataFrame:
         date = pd.Timestamp(rec["date"])
         if rec["topic"] not in {"AI Agents", "Generative AI", "LLM", "Developer Tools", "Robotics", "GPU Infrastructure"}:
             continue
-        count = int(max(0, RNG.poisson(rec["trend_score"] / 420)))
+        count = int(max(0, RNG.poisson(rec["trend_score"] / 420) * max(1.0, SCALE)))
         for _ in range(count):
             company = choose_company_for_topic(rec["topic"])
             views = int(max(800, RNG.lognormal(mean=10.9, sigma=0.7)))
@@ -930,6 +1004,8 @@ def build_funding_events(company_df: pd.DataFrame) -> pd.DataFrame:
             events_count = 7
         else:
             events_count = 4
+        # scale funding events moderately but cap to available dates
+        events_count = int(min(max(1, round(events_count * max(1.0, SCALE))), len(DATES)))
         chosen_dates = sorted(RNG.choice(DATES.to_numpy(), size=events_count, replace=False))
         for dt in chosen_dates:
             ts = pd.Timestamp(dt)
@@ -975,7 +1051,8 @@ def build_producthunt(company_df: pd.DataFrame) -> pd.DataFrame:
     rows = []
     launch_id = 950000
     candidates = company_df[company_df["company_id"].isin(["CMP-013", "CMP-014", "CMP-015", "CMP-028", "CMP-031", "CMP-038", "CMP-039", "CMP-037"])]
-    sampled = candidates.sample(n=min(2400, len(candidates)), random_state=SEED)
+    sample_n = min(int(2400 * max(1.0, SCALE)), len(candidates))
+    sampled = candidates.sample(n=sample_n, random_state=SEED)
     for rec in sampled.to_dict("records"):
         company = COMPANY_BY_ID[rec["company_id"]]
         topic = weighted_choice(company["topics"], [1] * len(company["topics"]))
@@ -1015,7 +1092,7 @@ def build_news_mentions(topic_df: pd.DataFrame) -> pd.DataFrame:
     for rec in topic_df.to_dict("records"):
         date = pd.Timestamp(rec["date"])
         country = COUNTRY_BY_CODE[rec["country_code"]]
-        count = int(max(0, RNG.poisson(rec["trend_score"] / 900)))
+        count = int(max(0, RNG.poisson(rec["trend_score"] / 900) * max(1.0, SCALE)))
         for _ in range(count):
             company = choose_company_for_topic(rec["topic"])
             headline_mode = "risk" if rec["risk_indicator"] == "high" and RNG.random() < 0.4 else "growth"
@@ -1059,7 +1136,8 @@ def build_kaggle_activity(topic_df: pd.DataFrame) -> pd.DataFrame:
     rows = []
     kid = 990000
     filtered = topic_df[topic_df["topic"].isin({"LLM", "Generative AI", "MLOps", "Open Source AI", "Inference Optimization", "Data Engineering", "AI Agents"})]
-    sampled = filtered.sample(n=min(3200, len(filtered)), random_state=SEED)
+    sample_n = min(int(3200 * max(1.0, SCALE)), len(filtered))
+    sampled = filtered.sample(n=sample_n, random_state=SEED)
     for rec in sampled.to_dict("records"):
         date = pd.Timestamp(rec["date"])
         company = choose_company_for_topic(rec["topic"])
@@ -1097,9 +1175,222 @@ def write_csv(df: pd.DataFrame, path: Path) -> None:
     df.to_csv(path, index=False)
 
 
+def write_parquet(df: pd.DataFrame, path: Path, partition_by_date: bool = False) -> None:
+    try:
+        df2 = df.copy()
+        if partition_by_date:
+            # find candidate date columns
+            date_candidates = [c for c in ["date", "created_at", "published_at", "event_time", "activity_date", "posted_at", "launched_at", "announced_at"] if c in df2.columns]
+            if date_candidates:
+                dc = date_candidates[0]
+                df2[dc] = pd.to_datetime(df2[dc], errors="coerce")
+                df2["year"] = df2[dc].dt.year.fillna(0).astype(int)
+                df2["month"] = df2[dc].dt.month.fillna(0).astype(int)
+                outdir = path
+                # if a file path with extension was supplied, use directory
+                if outdir.suffix == ".parquet":
+                    outdir = path.with_suffix("")
+                outdir.mkdir(parents=True, exist_ok=True)
+                df2.to_parquet(outdir, index=False, partition_cols=["year", "month"])
+                return
+        df2.to_parquet(path, index=False)
+    except Exception:
+        # fallback: write as gzipped CSV if parquet fails
+        try:
+            df.to_csv(path.with_suffix('.csv.gz'), index=False, compression='gzip')
+        except Exception:
+            df.to_csv(path.with_suffix('.csv'), index=False)
+
+
+def write_ndjson(df: pd.DataFrame, path: Path, id_field: str | None = None) -> None:
+    with path.open('w', encoding='utf-8') as fh:
+        for rec in df.to_dict('records'):
+            fh.write(json.dumps(rec, default=str) + "\n")
+
+
+def write_es_bulk(df: pd.DataFrame, path: Path, id_field: str | None = None) -> None:
+    with path.open('w', encoding='utf-8') as fh:
+        for rec in df.to_dict('records'):
+            doc_id = rec.get(id_field) if id_field and id_field in rec else None
+            action = {"index": {}}
+            if doc_id:
+                action["index"]["_id"] = str(doc_id)
+            fh.write(json.dumps(action) + "\n")
+            fh.write(json.dumps(rec, default=str) + "\n")
+
+
+def validate_datasets(datasets: dict[str, pd.DataFrame]) -> dict[str, Any]:
+    """Run quick integrity checks and return a validation report."""
+    report: dict[str, Any] = {}
+    companies = datasets.get("companies")
+    id_sets = {}
+    if companies is not None:
+        id_sets["companies"] = set(companies["company_id"].dropna().astype(str).unique())
+
+    id_field_map = {
+        "twitter_stream": "tweet_id",
+        "linkedin_jobs": "job_id",
+        "github_events": "event_id",
+        "tech_blogs": "article_id",
+        "stackoverflow_questions": "question_id",
+        "reddit_discussions": "reddit_post_id",
+        "hackernews_posts": "hn_post_id",
+        "youtube_ai_content": "video_id",
+        "startup_funding": "funding_event_id",
+        "producthunt_launches": "launch_id",
+        "news_media_mentions": "mention_id",
+        "kaggle_ml_activity": "kaggle_activity_id",
+        "companies": "company_id",
+        "market_events": "event_id",
+    }
+
+    # primary key uniqueness checks
+    pk_issues = {}
+    for name, df in datasets.items():
+        pk = id_field_map.get(name)
+        if pk and pk in df.columns:
+            dup_count = int(df[pk].duplicated().sum())
+            if dup_count > 0:
+                pk_issues[name] = dup_count
+    report["duplicate_primary_keys"] = pk_issues
+
+    # cross-dataset company_id checks
+    fk_issues = {}
+    if "companies" in datasets:
+        company_ids = set(datasets["companies"]["company_id"].dropna().astype(str).unique())
+        for name, df in datasets.items():
+            if "company_id" in df.columns and name != "companies":
+                missing = set(df["company_id"].dropna().astype(str).unique()) - company_ids
+                if missing:
+                    fk_issues[name] = len(missing)
+    report["missing_company_refs"] = fk_issues
+
+    # date range checks for google_trends
+    if "google_trends" in datasets:
+        try:
+            g = datasets["google_trends"]
+            dates = pd.to_datetime(g["date"], errors="coerce")
+            out_of_range = int(((dates < pd.Timestamp(DATE_START)) | (dates > pd.Timestamp(DATE_END))).sum())
+            report["google_trends_out_of_range"] = out_of_range
+        except Exception:
+            report["google_trends_out_of_range"] = "error"
+
+    # simple funding -> hiring directional check
+    funding_signal = {"positive_after": 0, "negative_after": 0, "unknown": 0}
+    if "startup_funding" in datasets and "linkedin_jobs" in datasets:
+        try:
+            funding = datasets["startup_funding"].copy()
+            jobs = datasets["linkedin_jobs"].copy()
+            if "announced_at" in funding.columns and "posted_at" in jobs.columns:
+                funding["announced_at"] = pd.to_datetime(funding["announced_at"], errors="coerce")
+                jobs["posted_at"] = pd.to_datetime(jobs["posted_at"], errors="coerce")
+                for _, fe in funding.iterrows():
+                    cid = fe.get("company_id")
+                    dt = fe.get("announced_at")
+                    if pd.isna(cid) or pd.isna(dt):
+                        funding_signal["unknown"] += 1
+                        continue
+                    before = jobs[(jobs["company_id"] == cid) & (jobs["posted_at"] >= (dt - pd.Timedelta(days=30))) & (jobs["posted_at"] < dt)]
+                    after = jobs[(jobs["company_id"] == cid) & (jobs["posted_at"] > dt) & (jobs["posted_at"] <= (dt + pd.Timedelta(days=30)))]
+                    if before.empty or after.empty:
+                        funding_signal["unknown"] += 1
+                        continue
+                    before_mean = float(before["hiring_index"].dropna().mean()) if "hiring_index" in before.columns else 0.0
+                    after_mean = float(after["hiring_index"].dropna().mean()) if "hiring_index" in after.columns else 0.0
+                    if after_mean > before_mean:
+                        funding_signal["positive_after"] += 1
+                    else:
+                        funding_signal["negative_after"] += 1
+        except Exception:
+            funding_signal["error"] = True
+    report["funding_hiring_signal_summary"] = funding_signal
+
+    # write report
+    try:
+        (IMPORT_DIR / "validation_report.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
+    except Exception:
+        pass
+    return report
+
+
+def write_sql_seed(datasets: dict[str, pd.DataFrame]) -> None:
+    """Generate a seed loading SQL file (psql-friendly \copy commands) for all CSVs."""
+    lines = ["-- Seed load helper for TechTrends datasets (psql \copy commands)", "-- Update paths if you moved the Data directory:", ""]
+    top_level = {"linkedin_jobs", "twitter_stream", "github_events", "tech_blogs", "stackoverflow_questions", "google_trends"}
+    for name in datasets.keys():
+        if name in top_level:
+            rel = Path("Data") / f"{name}.csv"
+        else:
+            rel = Path("Data") / "market_intel" / f"{name}.csv"
+        lines.append(f"\\copy techtrends.{name} FROM '{rel.as_posix()}' CSV HEADER;")
+
+    (IMPORT_DIR / "seed_load.sql").write_text("\n".join(lines), encoding="utf-8")
+
+
+def write_json_schemas(datasets: dict[str, pd.DataFrame]) -> None:
+    """Emit simple JSON schema per dataset by inferring types from dtypes and sample values."""
+    schema_dir = MARKET_DIR / "schemas"
+    schema_dir.mkdir(parents=True, exist_ok=True)
+    for name, df in datasets.items():
+        fields: dict[str, Any] = {}
+        sample = df.head(3)
+        for col in df.columns:
+            col_dtype = str(df[col].dtype)
+            example = None
+            try:
+                example = sample[col].dropna().iloc[0]
+            except Exception:
+                example = None
+            if pd.api.types.is_integer_dtype(df[col].dtype):
+                jtype = "integer"
+            elif pd.api.types.is_float_dtype(df[col].dtype):
+                jtype = "number"
+            elif pd.api.types.is_bool_dtype(df[col].dtype):
+                jtype = "boolean"
+            else:
+                # try datetime
+                try:
+                    pd.to_datetime(df[col].dropna().iloc[:3])
+                    jtype = "string"
+                except Exception:
+                    jtype = "string"
+            fields[col] = {"type": jtype, "example": (str(example) if example is not None else None)}
+        out = {"$schema": "http://json-schema.org/draft-07/schema#", "title": f"{name}", "type": "object", "properties": fields}
+        (schema_dir / f"{name}.schema.json").write_text(json.dumps(out, indent=2), encoding="utf-8")
+
+
 def build_dataset_summary(datasets: dict[str, pd.DataFrame]) -> dict[str, Any]:
     summary = {name: int(len(df)) for name, df in datasets.items()}
-    summary["date_range"] = f"{DATE_START} to {DATE_END}"
+    date_columns = {
+        "linkedin_jobs": "posted_at",
+        "twitter_stream": "created_at",
+        "github_events": "event_time",
+        "tech_blogs": "published_at",
+        "stackoverflow_questions": "created_at",
+        "google_trends": "date",
+        "reddit_discussions": "created_at",
+        "hackernews_posts": "created_at",
+        "youtube_ai_content": "published_at",
+        "startup_funding": "announced_at",
+        "producthunt_launches": "launched_at",
+        "news_media_mentions": "published_at",
+        "kaggle_ml_activity": "activity_date",
+        "market_events": "event_date",
+    }
+    mins = []
+    maxs = []
+    for name, column in date_columns.items():
+        if name not in datasets or column not in datasets[name].columns:
+            continue
+        values = pd.to_datetime(datasets[name][column], errors="coerce").dropna()
+        if values.empty:
+            continue
+        mins.append(values.min())
+        maxs.append(values.max())
+    if mins and maxs:
+        summary["date_range"] = f"{min(mins).date().isoformat()} to {max(maxs).date().isoformat()}"
+    else:
+        summary["date_range"] = f"{DATE_START} to {DATE_END}"
     summary["total_rows"] = int(sum(len(df) for df in datasets.values()))
     summary["countries"] = [c["country"] for c in COUNTRIES]
     summary["topics"] = list(TOPICS.keys())
@@ -1489,57 +1780,131 @@ def write_api_samples(datasets: dict[str, pd.DataFrame]) -> None:
     (API_SAMPLES_DIR / "health.sample.json").write_text(json.dumps(health_payload, indent=2), encoding="utf-8")
 
 
-def main() -> None:
-    ensure_dirs()
-    topic_df = topic_curve()
-    company_df = company_daily_signals(topic_df)
+def generate_market_intel_datasets(
+    min_rows: int = 100000,
+    scale: float = 1.0,
+    seed: int = SEED,
+    formats: list[str] | None = None,
+) -> dict[str, Any]:
+    global RNG, SEED, SCALE
+    formats = formats or ["csv", "parquet", "ndjson"]
 
-    datasets = {
-        "linkedin_jobs": build_linkedin_jobs(company_df),
-        "twitter_stream": build_twitter_stream(topic_df),
-        "github_events": build_github_events(company_df),
-        "tech_blogs": build_tech_blogs(topic_df),
-        "stackoverflow_questions": build_stackoverflow(topic_df),
-        "google_trends": build_google_trends(topic_df),
-        "reddit_discussions": build_reddit(topic_df),
-        "hackernews_posts": build_hackernews(topic_df),
-        "youtube_ai_content": build_youtube(topic_df),
-        "startup_funding": build_funding_events(company_df),
-        "producthunt_launches": build_producthunt(company_df),
-        "news_media_mentions": build_news_mentions(topic_df),
-        "kaggle_ml_activity": build_kaggle_activity(topic_df),
-        "companies": build_companies_dimension(),
-        "market_events": build_events_dimension(),
+    SEED = int(seed)
+    RNG = np.random.default_rng(SEED)
+    SCALE = float(max(1.0, scale))
+
+    ensure_dirs()
+    apply_market_context_adjustments()
+
+    def _generate() -> dict[str, pd.DataFrame]:
+        topic_df = topic_curve()
+        company_df = company_daily_signals(topic_df)
+        return {
+            "linkedin_jobs": build_linkedin_jobs(company_df),
+            "twitter_stream": build_twitter_stream(topic_df),
+            "github_events": build_github_events(company_df),
+            "tech_blogs": build_tech_blogs(topic_df),
+            "stackoverflow_questions": build_stackoverflow(topic_df),
+            "google_trends": build_google_trends(topic_df),
+            "reddit_discussions": build_reddit(topic_df),
+            "hackernews_posts": build_hackernews(topic_df),
+            "youtube_ai_content": build_youtube(topic_df),
+            "startup_funding": build_funding_events(company_df),
+            "producthunt_launches": build_producthunt(company_df),
+            "news_media_mentions": build_news_mentions(topic_df),
+            "kaggle_ml_activity": build_kaggle_activity(topic_df),
+            "companies": build_companies_dimension(),
+            "market_events": build_events_dimension(),
+        }
+
+    datasets = _generate()
+    total_rows = sum(len(df) for df in datasets.values())
+    validation = validate_datasets(datasets)
+    if total_rows < min_rows:
+        required = math.ceil(min_rows / max(total_rows, 1))
+        SCALE = float(max(SCALE, required))
+        RNG = np.random.default_rng(SEED)
+        datasets = _generate()
+        total_rows = sum(len(df) for df in datasets.values())
+        validation = validate_datasets(datasets)
+
+    # map some datasets to primary output directories (keep original placement)
+    top_level = {"linkedin_jobs", "twitter_stream", "github_events", "tech_blogs", "stackoverflow_questions", "google_trends"}
+    id_fields = {
+        "twitter_stream": "tweet_id",
+        "linkedin_jobs": "job_id",
+        "github_events": "event_id",
+        "tech_blogs": "article_id",
+        "stackoverflow_questions": "question_id",
+        "reddit_discussions": "reddit_post_id",
+        "hackernews_posts": "hn_post_id",
+        "youtube_ai_content": "video_id",
+        "startup_funding": "funding_event_id",
+        "producthunt_launches": "launch_id",
+        "news_media_mentions": "mention_id",
+        "kaggle_ml_activity": "kaggle_activity_id",
+        "companies": "company_id",
+        "market_events": "event_id",
     }
 
-    write_csv(datasets["linkedin_jobs"], DATA_DIR / "linkedin_jobs.csv")
-    write_csv(datasets["twitter_stream"], DATA_DIR / "twitter_stream.csv")
-    write_csv(datasets["github_events"], DATA_DIR / "github_events.csv")
-    write_csv(datasets["tech_blogs"], DATA_DIR / "tech_blogs.csv")
-    write_csv(datasets["stackoverflow_questions"], DATA_DIR / "stackoverflow_questions.csv")
-    write_csv(datasets["google_trends"], DATA_DIR / "google_trends.csv")
+    format_set = set([f.lower() for f in formats])
 
-    write_csv(datasets["reddit_discussions"], MARKET_DIR / "reddit_discussions.csv")
-    write_csv(datasets["hackernews_posts"], MARKET_DIR / "hackernews_posts.csv")
-    write_csv(datasets["youtube_ai_content"], MARKET_DIR / "youtube_ai_content.csv")
-    write_csv(datasets["startup_funding"], MARKET_DIR / "startup_funding.csv")
-    write_csv(datasets["producthunt_launches"], MARKET_DIR / "producthunt_launches.csv")
-    write_csv(datasets["news_media_mentions"], MARKET_DIR / "news_media_mentions.csv")
-    write_csv(datasets["kaggle_ml_activity"], MARKET_DIR / "kaggle_ml_activity.csv")
-    write_csv(datasets["companies"], MARKET_DIR / "companies.csv")
-    write_csv(datasets["market_events"], MARKET_DIR / "market_events.csv")
+    for name, df in datasets.items():
+        outdir = DATA_DIR if name in top_level else MARKET_DIR
+        outdir.mkdir(parents=True, exist_ok=True)
+        if "csv" in format_set:
+            write_csv(df, outdir / f"{name}.csv")
+        if "parquet" in format_set:
+            partitionable = {"twitter_stream", "reddit_discussions", "github_events", "google_trends", "youtube_ai_content", "linkedin_jobs", "news_media_mentions"}
+            if name in partitionable:
+                write_parquet(df, outdir / f"{name}.parquet", partition_by_date=True)
+            else:
+                write_parquet(df, outdir / f"{name}.parquet")
+        if "ndjson" in format_set:
+            write_ndjson(df, IMPORT_DIR / f"{name}.ndjson")
+        if "es" in format_set:
+            write_es_bulk(df, IMPORT_DIR / f"{name}.es.bulk.ndjson", id_field=id_fields.get(name))
 
     summary = build_dataset_summary(datasets)
     (DATA_DIR / "dataset_summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
     (MARKET_DIR / "dataset_summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
+
+    # write machine-readable JSON schemas and SQL seed loader
+    write_json_schemas(datasets)
+    write_sql_seed(datasets)
 
     write_metadata_catalog(datasets)
     write_relationships_doc()
     write_import_assets()
     write_json_samples(datasets)
     write_api_samples(datasets)
+    write_market_context()
 
-    print(json.dumps(summary, indent=2))
+    return {
+        "summary": summary,
+        "validation": validation,
+        "formats": sorted(format_set),
+        "market_context_version": MARKET_CONTEXT_VERSION,
+        "market_context_sources": MARKET_CONTEXT_SOURCES,
+    }
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Generate market intelligence synthetic datasets")
+    parser.add_argument("--min-rows", type=int, default=100000, help="Minimum total rows across all datasets")
+    parser.add_argument("--scale", type=float, default=1.0, help="Initial scale multiplier for generation counts")
+    parser.add_argument("--seed", type=int, default=SEED, help="RNG seed for deterministic outputs")
+    parser.add_argument("--formats", nargs="+", default=["csv", "parquet", "ndjson"], help="Output formats to write (csv, parquet, ndjson, es)")
+    args = parser.parse_args()
+
+    result = generate_market_intel_datasets(
+        min_rows=args.min_rows,
+        scale=args.scale,
+        seed=args.seed,
+        formats=args.formats,
+    )
+    print("Validation summary:", json.dumps(result["validation"], indent=2))
+    print(json.dumps(result["summary"], indent=2))
 
 
 if __name__ == "__main__":
